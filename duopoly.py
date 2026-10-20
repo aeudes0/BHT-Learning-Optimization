@@ -1,9 +1,19 @@
 from typing import Any, Optional, Tuple, Union
 import numpy as np
-import scipy.optimize as opt
 
 TOTAL_CAPACITY = 80
 MAX_PERIODS = 100
+
+# Hyperparamètres (modifiables pour les tests en simulation)
+# Valeurs choisies par simulation (W2_simulate_dpc_notebook.ipynb, partie 3)
+OLS_WEIGHT = 1.0          # poids du prix OLS dans le lissage (1 - OLS_WEIGHT pour le dernier prix)
+MULTIPLIER_UP = 1.0       # réaction quand on vend plus vite que la courbe cible
+MULTIPLIER_DOWN = 1.0     # réaction quand on vend moins vite que la courbe cible
+BOOST_START = 95          # jour de début de la majoration de fin de saison
+BOOST_AMPLITUDE = 0.0     # majoration maximale atteinte au jour 100 (0 = désactivée)
+MIN_PRICE = 15.0          # prix plancher (aucune règle de la plateforme, choix stratégique)
+MAX_PRICE = 150.0         # prix plafond (les clients paient au plus 150)
+MIN_COMP_PRICE_OLS = 0.0  # en dessous de ce prix concurrent, on n'utilise pas le prix OLS
 
 # Courbe de ventes cible (sièges vendus cumulés par période)
 TARGET_CURVE = {
@@ -22,22 +32,19 @@ OLS_MODELS = {
 
 def get_ols_optimal_price(t: int, comp_price: float, default_price: float) -> float:
     # Sélection du modèle correspondant à la période actuelle
+    params = OLS_MODELS[100]
     for p_max in [20, 40, 60, 80, 100]:
         if t <= p_max:
             params = OLS_MODELS[p_max]
             break
-            
-    if params['price'] >= 0:
+
+    b = params['price']
+    a = params['intercept'] + params['price_competitor'] * comp_price
+    if b >= 0 or a <= 0:
         return default_price
 
-    # Fonction de revenu négatif à minimiser pour maximiser le profit
-    def neg_revenue(price):
-        demand = params['intercept'] + params['price'] * price + params['price_competitor'] * comp_price
-        demand = max(0.0, demand)
-        return -(price * demand)
-
-    res = opt.minimize_scalar(neg_revenue, bounds=(30.0, 150.0), method='bounded')
-    return float(res.x)
+    # Revenu R(p) = p * (a + b*p) : parabole concave, maximum en p* = -a / (2b)
+    return float(np.clip(-a / (2.0 * b), MIN_PRICE, MAX_PRICE))
 
 def get_target_sales(t: int) -> float:
     days = sorted(TARGET_CURVE.keys())
@@ -112,13 +119,13 @@ def p(
     # Calcul du prix optimal OLS et lissage avec le prix de référence
     if prices_historical_in_current_season is not None:
         comp_price = prices_historical_in_current_season[1, -1]
-        if comp_price >= 25.0:
+        if comp_price > 0 and comp_price >= MIN_COMP_PRICE_OLS:
             ols_price = get_ols_optimal_price(t, comp_price, reference_price)
-            reference_price = 0.5 * reference_price + 0.5 * ols_price
+            reference_price = (1.0 - OLS_WEIGHT) * reference_price + OLS_WEIGHT * ols_price
 
     # Ajustement selon l'écart avec la courbe cible
     delta = (sold_seats - target_sales) / max(1.0, target_sales)
-    pricing_multiplier = 2 if delta > 0 else 0.5
+    pricing_multiplier = MULTIPLIER_UP if delta > 0 else MULTIPLIER_DOWN
     new_price = reference_price * (1.0 + pricing_multiplier * delta)
     
     # Sécurité supplémentaire si le stock s'écoule trop vite
@@ -128,11 +135,11 @@ def p(
         new_price *= 3
 
     # Majoration de fin de saison
-    if t >= 85:
-        late_season_boost = 1.0 + 0.2 * ((t - 85) / 15.0)
+    if t >= BOOST_START:
+        late_season_boost = 1.0 + BOOST_AMPLITUDE * ((t - BOOST_START) / (MAX_PERIODS - BOOST_START))
         new_price *= late_season_boost
 
-    final_price = float(np.clip(new_price, 30.0, 150.0))
+    final_price = float(np.clip(new_price, MIN_PRICE, MAX_PRICE))
     information_dump['last_price'] = final_price
     
     return final_price, information_dump
