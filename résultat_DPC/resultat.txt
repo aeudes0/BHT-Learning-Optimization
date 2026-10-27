@@ -1,0 +1,15 @@
+overall ranking, name, avg ranking per simulation, avg revenue per simulation
+
+2026-10-21
+placement1:33%
+placement1:67%
+Stockout frequency:23.20 %
+Error rate:0.00%
+51	IndependentCoati	1.67	$149,106
+
+2026-10-24 
+placement1:67%
+placement1:33%
+Stockout frequency:1.00 %
+Error rate:0.00%
+51	IndependentCoati	1.33	$58,762
