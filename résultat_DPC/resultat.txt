@@ -13,3 +13,19 @@ placement1:33%
 Stockout frequency:1.00 %
 Error rate:0.00%
 51	IndependentCoati	1.33	$58,762
+
+2026-10-31 
+placement1:83%
+placement2:17%
+Stockout frequency:0.00 %
+Error rate:0.00%
+15	IndependentCoati	1.17	$52,334
+
+
+2026-11-2 
+placement1:56%
+placement2:44%
+Stockout frequency:9.20 %
+Error rate:0.00%
+9	IndependentCoati	1.44	$236,759
+

@@ -26,6 +26,27 @@ Traces pour les 4 présentations : ce qui a été fait, pourquoi, et les résult
 | ≤ 16/10 (CSV1) | W1/W2 initiale | ? | ? | ≈ 174 100 $ | ? | SaffronDolphin, AttentiveOriole |
 | 21/10 | W3 corrigée | 33 % | 1,67 | 149 106 $ | 23,2 % | RustlingNightingale, FlashyInchworm, DelicateMoose |
 | 24/10 | W3 corrigée | 67 % | 1,33 | 58 762 $ | 1,0 % | ElectricButterfly, IndependentPorpoise, Winner_2023 |
+| 31/10 | **W4** | **83 %** | 1,17 | 52 334 $ (classement général : **15e**) | 0 % | PompousRaven, PinkDuck, ElectricButterfly, ImpartialGoldfish, VersedJackdaw, UncoveredElephant |
+| 2/11 | W4 | 56 % | 1,44 | 236 759 $ (classement général : **9e**) ; 2368 / saison, 57,8 sièges | 9,2 % | DaringVole, StoicCentipede, IndependentPorpoise, TopazCat, SageSloth, WhimsicalMarten, PinkDuck, IncredibleDogfish, ImposingCrocodile (18 compétitions) |
+
+Analyse du 2/11 (fichier nommé `details2_11_2026`, jour_mois au lieu de mois_jour : les scripts lisent maintenant les deux formats via `presentations/P1/dpc_files.py`) : 98,5 % des prix rejoués à l'identique avec la W4. Demande forte. Le nouveau mode monopole fonctionne : 2009 billets vendus quand le concurrent est en rupture, à 51 € en moyenne (contre 0 billet à 132 € avec la W3 le 21/10). Une compétition presque vide (4HKdWJ, WhimsicalMarten à 12,6 €) : 0,2 siège vendu par saison, prix bloqué au plancher de 15 €. 0 erreur, 19 ms par appel en moyenne (max 0,99 s).
+
+Run d'Alois du 2/11 (W4, branche `alois` commit b3c028b, `results/duopoly_competition_details_1102.csv`) : 18 compétitions, 1751 / saison, 62,2 sièges, rupture de ses sièges dans 57 % des saisons, 0 erreur. Rejeu : 96 % des prix identiques avec sa W4 **sans** son `.pkl` (courbe linéaire de secours), contre 47 % avec le `.pkl`. Son code cherche `target_sales_curve.pkl` avec un chemin relatif, introuvable sur la plateforme : pas de plantage (le bug des clés texte ne s'est pas déclenché), mais sa vraie courbe cible n'a pas servi. Classement : à demander à Alois.
+
+Comparaison équitable mise à jour avec le 2/11 (66 compétitions : 46 de Simon, 20 d'Alois). Sur les 50 jamais vues par le modèle de Simon W4 : Alois W4 2169, Alois W3 2167, Simon W4 2063, Simon W3 1950 (Alois W4 gagne 57 % des saisons, 7 % d'égalités).
+
+Analyse du 31/10 : 99,5 % des prix rejoués à l'identique avec la W4. La demande était faible : seulement 27 sièges vendus sur 80 en moyenne, et la courbe de ventes reste sous la marge basse dans 100 % des saisons. Le prix descend donc souvent au plancher de 15 € (jusqu'à 93 % des périodes contre ElectricButterfly). Leçon : la courbe cible doit s'adapter au niveau de demande.
+
+Algorithme d'Alois (branche `alois`) : en W4, modèle ARX(1) estimé pendant la saison (régression en ligne), mélangé à 40 % avec la courbe cible. Résultats DPC (d'après son `Project_log.md`) : W2 16e et 67e sur 75 ; W3 46e et 43e sur 75. Simulation sur 28 compétitions : Simon W4 1366, Alois W4 1228, Simon W3 1163 ; Simon W4 fait mieux dans 52 % des saisons ; Alois est légèrement devant sur le run du 31/10.
+
+**Comparaison équitable (1/11, `presentations/P1/team_analysis.py`)** : 48 compétitions (28 de Simon + 20 d'Alois, branche `alois`, dossier `results/`). Revenu simulé par saison :
+- sur tout : Simon W4 1825, Alois W3 1806, Alois W4 1760, Simon W3 1616 ;
+- sur les 32 compétitions jamais vues par le modèle de Simon W4 : Alois W4 **1774**, Alois W3 1733, Simon W4 1697, Simon W3 1585 (Alois W4 gagne 65 % des saisons).
+
+Chaque algo gagne sur les données de son auteur ; sur des données nouvelles, l'apprentissage en ligne est un peu devant. Dans les deux algos, la phase de monopole est gâchée (0 à 3 billets vendus).
+⚠️ Le `target_sales_curve.pkl` de la W4 d'Alois a des clés texte (format du notebook W4 du prof) : avec lui, `duopoly.py` lève une `TypeError` à chaque mise à jour. La simulation utilise ses clés converties en nombres.
+
+**Présentation #1 (3/11)** : 18 diapos en anglais, avec notes d'orateur et répartition Simon/Alois. Version finale (données du 2/11 incluses) : https://claude.ai/artifact/JzApbTBuTXZ6M8VqgNk59f — graphiques générés par `presentations/P1/make_figures.py` dans `presentations/P1/figures/`.
 
 Le revenu dépend surtout du concurrent et de la demande tirée au hasard : seul le classement permet de comparer les runs.
 

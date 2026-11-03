@@ -2,3 +2,10 @@ dpc_env/
 __pycache__/
 *.csv
 venv/
+
+# Résultats DPC officiels : on les garde sur GitHub
+!résultat_DPC/*.csv
+
+# Copies locales de la branche d'Alois (déjà sur la branche alois)
+BHT-Learning-Optimization-alois/
+BHT-Learning-Optimization_Alois/
