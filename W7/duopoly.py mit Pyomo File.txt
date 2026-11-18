@@ -1,0 +1,310 @@
+from typing import Any, Optional, Tuple, Union
+import numpy as np
+import pandas as pd
+import pickle
+from scipy.optimize import minimize_scalar
+from pyomo.environ import ConcreteModel, Var, RangeSet, NonPositiveReals, NonNegativeReals, NegativeReals, Objective, Constraint, SolverFactory
+    
+def pyomoprice(day,d,p1,p2):
+    model = ConcreteModel('Demand_Estim_1')
+
+    # the beta variables for k = 1,2 (in Python 0 and 1) and all t in T
+    MaxT = day
+    delta = 0.05
+    
+    T = RangeSet(1,MaxT,1)
+    K = RangeSet(1,1,1)
+    model.beta0 = Var(K,T, within = NonNegativeReals)
+    model.beta1 = Var(K,T, within = NonPositiveReals)
+    model.beta2 = Var(K,T, within = NonNegativeReals)    
+    model.deltaTau = Var(T, within = NonNegativeReals)
+
+    def obj_rule(m):
+    	return sum(m.deltaTau[t] for t in T)
+    model.obj = Objective(rule=obj_rule)
+
+    def first_rule(m, t):
+    	return d[t-1] - (m.beta0[1,t] + m.beta1[1,t] * p1[t-1] + m.beta2[1,t] * p2[t-1]) <= m.deltaTau[t]
+    model.first = Constraint(T, rule = first_rule)
+
+    def second_rule(m, t):
+    	return -d[t-1] + (m.beta0[1,t] + m.beta1[1,t] * p1[t-1] + m.beta2[1,t] * p2[t-1]) <= m.deltaTau[t]
+    model.second = Constraint(T, rule = second_rule)
+
+    def third_rule0(m, t):
+        if t < MaxT:
+            return m.beta0[1,t] - m.beta0[1,t+1] <= delta 
+        else:
+            return Constraint.Feasible
+    model.third0 = Constraint(T, rule = third_rule0)
+
+    def fourth_rule0(m, t):
+        if t < MaxT:
+            return -m.beta0[1,t] + m.beta0[1,t+1] <= delta
+        else:
+            return Constraint.Feasible
+    model.fourth0 = Constraint(T, rule = fourth_rule0)
+
+    def third_rule1(m, t):
+        if t < MaxT:
+            return m.beta1[1,t] - m.beta1[1,t+1] <= delta
+        else:
+            return Constraint.Feasible
+    model.third1 = Constraint(T, rule = third_rule1)
+    
+    def fourth_rule1(m, t):
+        if t < MaxT:
+            return -m.beta1[1,t] + m.beta1[1,t+1] <= delta
+        else:
+            return Constraint.Feasible
+    model.fourth1 = Constraint(T, rule = fourth_rule1)
+
+    def third_rule2(m, t):
+        if t < MaxT:
+            return m.beta2[1,t] - m.beta2[1,t+1] <= delta 
+        else:
+            return Constraint.Feasible
+    model.third2 = Constraint(T, rule = third_rule2)
+
+    def fourth_rule2(m, t):
+        if t < MaxT:
+            return -m.beta2[1,t] + m.beta2[1,t+1] <= delta 
+        else:
+            return Constraint.Feasible
+    model.fourth2 = Constraint(T, rule = fourth_rule2)
+
+    # start solution peocess
+    opt = SolverFactory('glpk')
+    
+    opt.solve(model)
+  
+    # extract solution
+    beta10 = list(model.beta0.get_values().values())
+    beta11 = list(model.beta1.get_values().values())
+    beta12 = list(model.beta2.get_values().values())
+    
+    N = 10
+    beta10t = np.average(beta10[MaxT-N+1:MaxT])
+    beta11t = np.average(beta11[MaxT-N+1:MaxT])
+    beta12t = np.average(beta12[MaxT-N+1:MaxT])
+    
+    # setup the corresponding IP model
+    model = ConcreteModel('Demand_Estim_2')
+
+    # the beta variables for k = 1,2 and all t in T
+    delta2 = 0.01
+    
+    T = RangeSet(1,MaxT,1)
+    K = RangeSet(2,2,1)
+    model.beta0 = Var(K,T, within = NonNegativeReals)
+    model.beta1 = Var(K,T, within = NonNegativeReals)
+    model.beta2 = Var(K,T, within = NegativeReals)    
+
+    def obj_rule(m):
+        return sum((p2[t-1] + (m.beta0[2,t] + m.beta1[2,t] * p1[t-1])/(2.0 * m.beta2[2,t]))**2 for t in T)
+    model.obj = Objective(rule=obj_rule)
+
+    # solve model without constraint in order to obtain a feasible solution
+    
+    def third_rule0(m, t):
+        if t < MaxT:
+            return (m.beta0[2,t] - m.beta0[2,t+1])**2 <= delta2
+        else:
+            return Constraint.Feasible
+    model.third0 = Constraint(T, rule = third_rule0)
+
+    #def fourth_rule0(m, t):
+    #   if t < MaxT:
+    #        return -m.beta0[2,t] + m.beta0[2,t+1] <= delta
+    #    else:
+    #        return Constraint.Feasible
+    #model.fourth0 = Constraint(T, rule = fourth_rule0)
+
+    def third_rule1(m, t):
+        if t < MaxT:
+            return (m.beta1[2,t] - m.beta1[2,t+1])**2 <= delta2
+        else:
+            return Constraint.Feasible
+    model.third1 = Constraint(T, rule = third_rule1)
+
+    #def fourth_rule1(m, t):
+    #    if t < MaxT:
+    #        return -m.beta1[2,t] + m.beta1[2,t+1] <= delta
+    #    else:
+    #        return Constraint.Feasible
+    #model.fourth1 = Constraint(T, rule = fourth_rule1)
+    
+    def third_rule2(m, t):
+        if t < MaxT:
+            return (m.beta2[2,t] - m.beta2[2,t+1])**2 <= delta2 
+        else:
+            return Constraint.Feasible
+    model.third2 = Constraint(T, rule = third_rule2)
+
+    #def fourth_rule2(m, t):
+    #    if t < MaxT:
+    #        return -m.beta2[2,t] + m.beta2[2,t+1] <= delta 
+    #    else:
+    #        return Constraint.Feasible
+    #model.fourth2 = Constraint(T, rule = fourth_rule2)
+    
+    # solver options for ipopt can be added here to a dictionary
+    solver_options = dict()
+
+    # start solution peocess
+    opt = SolverFactory('ipopt', sense = 'minimize',  options = solver_options )
+    
+    opt.solve(model, tee=True)
+	
+    beta20 = list(model.beta0.get_values().values())
+    beta21 = list(model.beta1.get_values().values())
+    beta22 = list(model.beta2.get_values().values())
+    
+    N = 10
+    beta20t = np.average(beta20[MaxT-N+1:MaxT])
+    beta21t = np.average(beta21[MaxT-N+1:MaxT])
+    beta22t = np.average(beta22[MaxT-N+1:MaxT])
+  
+    # because we want to maximize, we minimize the negative function     
+    f = lambda x: -x * ( beta10t + beta11t * x + beta12t * (beta20t + beta21t * x)/(-2.0 * beta22t))
+    
+    res = minimize_scalar(f, method='bounded', bounds = (0, 100))    
+
+    return res.x
+
+def p(
+    current_selling_season: int,
+    selling_period_in_current_season: int,
+    prices_historical_in_current_season: Union[np.ndarray, None],
+    demand_historical_in_current_season: Union[np.ndarray, None],
+    competitor_has_capacity_current_period_in_current_season: bool,
+    information_dump=Optional[Any],
+) -> Tuple[float, Any]:
+    """Determine which price to set for the next period.
+
+    Parameters
+    ----------
+    current_selling_season : int
+        The current selling season (1, 2, 3, ...).
+    selling_period_in_current_season : int
+        The period in the current season (1, 2, ..., 1000).
+    prices_historical_in_current_season : Union[np.ndarray, None]
+        A two-dimensional array of historical prices. The rows index the competitors and the columns
+        index the historical selling periods. Equal to `None` if
+        `selling_period_in_current_season == 1`.
+    demand_historical_in_current_season : Union[np.ndarray, None]
+        A one-dimensional array of historical (own) demand. Equal to `None` if
+        `selling_period_in_current_season == 1`.
+    competitor_has_capacity_current_period_in_current_season : bool
+        `False` if competitor is out of stock
+    information_dump : Any, optional
+        To keep a state (e.g., a trained model), by default None
+
+    Examples
+    --------
+
+    >>> prices_historical_in_current_season.shape == (2, selling_period_in_current_season - 1)
+    True
+
+    >>> demand_historical_in_current_season.shape == (selling_period_in_current_season - 1, )
+    True
+
+    Returns
+    -------
+    Tuple[float, Any]
+        The price and a the information dump (with, e.g., a state of the model).
+    """
+    # first set some shorter names for convenience
+    day = selling_period_in_current_season
+    season = current_selling_season
+    demand = demand_historical_in_current_season
+    prices = prices_historical_in_current_season
+    sold_out = not competitor_has_capacity_current_period_in_current_season
+    
+    if day >= 20:
+        price = pyomoprice(day,demand,prices_historical_in_current_season[0],prices_historical_in_current_season[1])
+
+    # set some indicator variables
+    first_day = True if day == 1 else False
+    first_season = True if season == 1 else False
+    season_previous_period = season if not first_day else season - 1
+       
+    min_price = 1.0
+    max_price = 105.0
+    
+    if first_day:
+        # Randomize in the first period of the season
+        price = np.random.uniform(20, 60)
+    elif selling_period_in_current_season == 101:
+        # No price in selling period 101 (only used for getting information from previous period)
+        price = None
+    else:
+        # Set the price that my competitor set in the previous period
+        if sold_out:
+            price = max_price
+        if not sold_out:
+            mylastprice = prices_historical_in_current_season[0, -1]
+            price = mylastprice
+            complastprice = prices_historical_in_current_season[1, -1]                
+            if mylastprice < complastprice:
+                price = min(1.1 * mylastprice, complastprice, 100)
+            elif demand[-1] < 0.5:  
+                price = max(complastprice, min_price)
+            else:
+                price += 1
+            if price < min_price:
+                price = min_price
+                
+    # if first day of simulation, initialize information dump
+    if first_day and first_season:
+        return price, _initialize_information_dump()
+
+        
+    if not first_day:
+        # do the book keeping (unless we are on the first day)
+        capacity = 80 - np.sum(demand)
+        new_row = pd.DataFrame([{
+            'day': day - 1,
+            'season': season_previous_period,
+            'demand': demand[-1],
+            'sumdemand': np.sum(demand),
+            'own_price': prices[0, -1],
+            'competitor_price': prices[1, -1],
+            'capacity': capacity
+            }])
+
+        information_dump['history'] = pd.concat(
+            [information_dump['history'], new_row], 
+            ignore_index=True
+            )
+
+    ## Save information dump to disk in selling period 101 and selling season 100
+    if selling_period_in_current_season == 101 and current_selling_season == 100:
+        with open('duopoly_feedback.data', 'wb') as handle:
+            pickle.dump(information_dump, handle, protocol=pickle.HIGHEST_PROTOCOL)
+         
+    return price, information_dump
+
+def _initialize_information_dump():
+    """Initialize the information dump"""
+
+    ## Try to load duopoly feedback data from disk
+    try:
+        with open('duopoly_feedback.data', 'rb') as handle:
+            information_dump = pickle.load(handle)
+        return information_dump
+    except:
+        return {
+
+            # keep track of historical observables
+            'history': (
+                pd.DataFrame({
+                    'day': [],
+                    'season': [],
+                    'demand': [],
+                    'own_price': [],
+                    'competitor_price': [],
+                    'capacity': [],
+                })
+            ),
+        }

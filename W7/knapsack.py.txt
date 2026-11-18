@@ -1,0 +1,37 @@
+from pyomo.environ import *
+
+# definition of instance data
+# items
+A = ['hammer', 'wrench', 'screwdriver', 'towel']
+# value (benefit)
+b = {'hammer':8, 'wrench':3, 'screwdriver':6, 'towel':11}
+# weight
+w = {'hammer':5, 'wrench':7, 'screwdriver':4, 'towel':3}
+# maximum available weight (capacity)
+W_max = 14
+
+# setup the corresponding IP model
+model = ConcreteModel('knapsack')
+
+# x consists of binary variables
+model.x = Var( A, within = Binary)
+
+# definition of the objective function
+model.value = Objective( 
+	expr = sum( b[i] * model.x[i] for i in A), sense = maximize )
+
+# definition of the (single) constraint
+model.weight = Constraint(
+	expr = sum( w[i] * model.x[i] for i in A) <= W_max )
+	
+# start solution peocess
+opt = SolverFactory('glpk')
+
+result_obj = opt.solve(model, tee=True)
+	
+# display model and its solution
+#model.pprint()
+
+print(result_obj)
+
+print(list(model.x.get_values().values()))

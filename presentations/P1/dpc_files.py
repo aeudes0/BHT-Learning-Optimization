@@ -1,7 +1,7 @@
 """Liste des CSV DPC de Simon avec une étiquette de date fiable.
 
 Les noms de fichiers n'ont pas toujours le même format : 'details10_21_2026' (mois_jour)
-mais 'details2_11_2026' (jour_mois). On essaie les deux lectures et on garde la seule date
+mais 'details2_11_2026' (jour_mois), et depuis le 18/11 'details21_10_26' (jour_mois_aa). On essaie les deux lectures et on garde la seule date
 plausible : pendant le cours (octobre 2026 - février 2027) et pas dans le futur."""
 import datetime as dt
 import glob
@@ -14,6 +14,8 @@ COURSE_START, COURSE_END = dt.date(2026, 10, 1), dt.date(2027, 2, 28)
 def run_date(path, today=None):
     today = today or dt.date.today()
     a, b, year = map(int, re.search(r'details(\d+)_(\d+)_(\d+)\.csv$', os.path.basename(path)).groups())
+    if year < 100:          # depuis le 18/11 : année sur 2 chiffres ('details21_10_26', jour_mois_aa)
+        year += 2000
     dates = set()
     for month, day in ((a, b), (b, a)):
         try:

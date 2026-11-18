@@ -29,3 +29,45 @@ Stockout frequency:9.20 %
 Error rate:0.00%
 9	IndependentCoati	1.44	$236,759
 
+2026-11-04 
+placement1:57%
+placement2:43%
+Stockout frequency:7.40 %
+Error rate:0.00%
+11	IndependentCoati	1.43	$136,107
+
+2026-11-07 
+placement1:48%
+placement2:52%
+Stockout frequency:13.30 %
+Error rate:0.00%
+9	IndependentCoati	1.52	$198,828
+
+2026-11-09 
+placement1:58%
+placement2:42%
+Stockout frequency:10.50 %
+Error rate:0.00%
+8	IndependentCoati	1.42	$217,630
+
+2026-11-11 
+placement1:50%
+placement2:50%
+Stockout frequency:10.30 %
+Error rate:0.00%
+13	IndependentCoati	1.5	$183,386
+
+
+2026-11-14 
+placement1:47%
+placement2:53%
+Stockout frequency:3.50 %
+Error rate:0.00%
+12	IndependentCoati	1.53	$165,921
+
+2026-11-16 
+placement1:63%
+placement2:37%
+Stockout frequency:10.60 %
+Error rate:0.00%
+11	IndependentCoati	1.37	$206,284

@@ -31,6 +31,23 @@ ARIMA_ORDER = (1, 1, 1)
 ARIMA_MIN_HISTORY = 10    # nombre minimum de prix observés avant d'utiliser ARIMA
 MONOPOLY_USE_MODEL = True # concurrent en rupture : prix OLS avec un concurrent "à 150" (sinon ancienne règle)
 
+# Semaine 6 : prix optimisé sous contrainte de capacité (cours du 10/11, scipy.optimize)
+USE_CAPACITY_OPT = True   # plan de prix des jours restants : max revenu attendu, ventes attendues <= sièges restants
+CAPACITY_OPT_METHOD = 'lagrange'  # 'lagrange' (solution exacte par multiplicateur) ou 'slsqp' (scipy.optimize.minimize)
+FOLLOW_BAND = True        # garder la correction par la courbe de remplissage en plus du plan optimisé
+
+# Semaine 7 : approche d'apprentissage de Bertsimas & Perakis (cours du 17/11)
+# Étapes 1-2 : la demande de LA compétition en cours est apprise au fil des saisons (information_dump gardé
+# d'une saison à l'autre), en partant du modèle commun du .pkl (« a priori »).
+USE_ONLINE_DEMAND = True 
+ONLINE_MODE = 'level'     # 'level' : on apprend seulement le niveau de demande (a) ; 'full' : a, b et c
+PRIOR_WEIGHT = 500.0      # poids du modèle commun, en nombre d'observations équivalentes (par bloc de 20 jours)
+# Étapes 3-4 : prévoir la réaction du concurrent à notre prix et en tenir compte dans notre prix optimal.
+# Modèle : prix_conc(t) - prix_conc(t-1) = alpha + k * (notre_prix(t-1) - prix_conc(t-1)), k entre 0 et 1
+USE_REACTION = True 
+REACTION_MIN_OBS = 30     # nombre minimum d'observations avant d'utiliser le modèle de réaction
+REACTION_HORIZON = 20     # nombre de jours sur lesquels on compte l'effet de notre prix sur celui du concurrent
+
 # Fichier de paramètres produit par W4-Notebooks/W4_capacity_OLS_ARIMA.ipynb
 PARAMS_FILE = 'duopoly_params.pkl'
 
@@ -82,21 +99,150 @@ def generate_random_curve() -> np.ndarray:
     return np.interp(np.arange(1, MAX_PERIODS + 1), days, curve)
 
 
-def get_ols_optimal_price(t: int, comp_price: float, default_price: float) -> float:
-    # Sélection du modèle correspondant à la période actuelle
-    params = OLS_MODELS[100]
-    for p_max in [20, 40, 60, 80, 100]:
-        if t <= p_max:
-            params = OLS_MODELS[p_max]
-            break
-
-    b = params['price']
-    a = params['intercept'] + params['price_competitor'] * comp_price
+def get_ols_optimal_price(t: int, comp_price: float, default_price: float, learn: Optional[dict] = None,
+                          gamma: float = 0.0, last_price: float = 0.0) -> float:
+    # Modèle du bloc de 20 jours contenant t (corrigé par l'apprentissage et la réaction en semaine 7)
+    a, b = effective_coefs(np.array([t]), comp_price, learn, gamma, last_price)
+    a, b = float(a[0]), float(b[0])
     if b >= 0 or a <= 0:
         return default_price
 
     # Revenu R(p) = p * (a + b*p) : parabole concave, maximum en p* = -a / (2b)
     return float(np.clip(-a / (2.0 * b), MIN_PRICE, MAX_PRICE))
+
+BLOCKS = (20, 40, 60, 80, 100)
+
+
+def block_of(t: int) -> int:
+    return next((k for k in BLOCKS if t <= k), BLOCKS[-1])
+
+
+def get_ols_params(t: int, learn: Optional[dict] = None) -> Tuple[float, float, float]:
+    # (a, b, c) du bloc de 20 jours contenant le jour t ; corrigés par l'apprentissage de la semaine 7
+    k = block_of(t)
+    params = OLS_MODELS[k]
+    a, b, c = params['intercept'], params['price'], params['price_competitor']
+    if learn is None or not USE_ONLINE_DEMAND:
+        return a, b, c
+    st = learn['blocks'][k]
+    n = st['n']
+    if n <= 0:
+        return a, b, c
+    prior = np.array([a, b, c])
+    if ONLINE_MODE == 'full':
+        # régression « ridge » vers le modèle commun : beta = (X'X + w*S)^-1 (X'y + w*S*prior), S = X'X/n
+        S = st['xtx'] / n + np.diag([1e-6, 1e-6, 1e-6])
+        w = PRIOR_WEIGHT
+        try:
+            beta = np.linalg.solve(st['xtx'] + w * S, st['xty'] + w * S @ prior)
+        except np.linalg.LinAlgError:
+            return a, b, c
+        a, b, c = float(beta[0]), min(float(beta[1]), -0.005), max(float(beta[2]), 0.0)
+        return a, b, c
+    # 'level' : on décale seulement a de l'erreur moyenne du modèle commun dans cette compétition
+    residual = st['xty'][0] - float(st['xtx'][0] @ prior)   # somme de (demande - prédiction du modèle commun)
+    return a + residual / (n + PRIOR_WEIGHT), b, c
+
+
+def learn_init() -> dict:
+    return {'blocks': {k: {'n': 0, 'xtx': np.zeros((3, 3)), 'xty': np.zeros(3)} for k in BLOCKS},
+            'react': np.zeros(5)}   # n, somme x, somme y, somme x², somme x*y
+
+
+def learn_update(learn: dict, t_obs: int, price: float, comp_price: float, demand: float) -> None:
+    # une observation de demande (jour t_obs, concurrent présent) : mise à jour de X'X et X'y du bloc
+    x = np.array([1.0, price, comp_price])
+    st = learn['blocks'][block_of(t_obs)]
+    st['n'] += 1
+    st['xtx'] += np.outer(x, x)
+    st['xty'] += x * demand
+
+
+def reaction_update(learn: dict, gap: float, change: float) -> None:
+    # gap = notre prix - prix concurrent (veille) ; change = variation du prix concurrent le lendemain
+    learn['react'] += np.array([1.0, gap, change, gap * gap, gap * change])
+
+
+def reaction_params(learn: Optional[dict]) -> Optional[Tuple[float, float]]:
+    # (alpha, k) estimés par moindres carrés, ou None si pas assez de données
+    if learn is None or not USE_REACTION:
+        return None
+    n, sx, sy, sxx, sxy = learn['react']
+    if n < REACTION_MIN_OBS:
+        return None
+    var = sxx - sx * sx / n
+    if var <= 1e-9:
+        return None
+    k = float(np.clip((sxy - sx * sy / n) / var, 0.0, 1.0))
+    alpha = (sy - k * sx) / n
+    return float(alpha), k
+
+
+def reaction_gamma(k: float, horizon: int) -> float:
+    # part moyenne de notre changement de prix que le concurrent aura copiée sur les prochains jours
+    # (jour 0 : il ne peut pas encore réagir ; jour j : 1 - (1-k)^j)
+    h = max(1, horizon)
+    j = np.arange(h)
+    return float(np.mean(1.0 - (1.0 - k) ** j))
+
+
+def effective_coefs(days: np.ndarray, comp_price: float, learn: Optional[dict], gamma: float,
+                    last_price: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Demande attendue d_s = A_s + B_s * p (p = notre prix).
+    Sans réaction : A = a + c*pc, B = b. Avec réaction (étape 4 du cours) : le concurrent suit une part gamma
+    de notre changement de prix, pc(p) = pc + gamma*(p - dernier prix), donc A = a + c*(pc - gamma*dernier prix)
+    et B = b + c*gamma (on garde B <= -0,002 pour que le revenu ait un maximum)."""
+    abc = np.array([get_ols_params(int(s), learn) for s in days])
+    a, b, c = abc[:, 0], abc[:, 1], abc[:, 2]
+    if gamma > 0:
+        g = np.minimum(gamma, np.where(c > 0, (-0.002 - b) / np.maximum(c, 1e-9), gamma))
+        g = np.clip(g, 0.0, 1.0)
+        return a + c * (comp_price - g * last_price), b + c * g
+    return a + c * comp_price, b
+
+
+def get_capacity_optimal_price(t: int, comp_price: float, remaining: int, learn: Optional[dict] = None,
+                               gamma: float = 0.0, last_price: float = 0.0) -> Optional[float]:
+    """Semaine 6 : plan de prix pour les jours t..100.
+    max  sum_s p_s * d_s     avec d_s = a_s + b_s*p_s + c_s*pc  (pc = prix concurrent prédit, gardé constant)
+    s.c. sum_s d_s <= sièges restants,  15 <= p_s <= 150,  d_s >= 0
+    Semaine 7 : a, b, c appris dans la compétition, et réaction du concurrent (gamma).
+    Renvoie le prix du jour t (None si le modèle n'est pas utilisable)."""
+    days = np.arange(t, MAX_PERIODS + 1)
+    a, b = effective_coefs(days, comp_price, learn, gamma, last_price)
+    if np.any(b >= 0):
+        return None
+    lo, hi = MIN_PRICE, MAX_PRICE
+
+    if CAPACITY_OPT_METHOD == 'slsqp':
+        from scipy.optimize import minimize
+        x0 = np.clip(-a / (2 * b), lo, hi)
+        res = minimize(lambda x: -np.sum(x * (a + b * x)), x0, jac=lambda x: -(a + 2 * b * x),
+                       method='SLSQP', bounds=[(lo, hi)] * len(days),
+                       constraints=[{'type': 'ineq', 'fun': lambda x: remaining - np.sum(a + b * x),
+                                     'jac': lambda x: -b[None, :]},
+                                    {'type': 'ineq', 'fun': lambda x: a + b * x, 'jac': lambda x: np.diag(b)}],
+                       options={'maxiter': 100})
+        return float(np.clip(res.x[0], lo, hi)) if res.success else None
+
+    # Méthode de Lagrange : chaque siège a une "valeur" lam >= 0 ; on maximise sum (p_s - lam) * d_s,
+    # d'où p_s = p*_s + lam/2 (borné). lam = 0 si la contrainte ne gêne pas, sinon on cherche lam
+    # (par dichotomie) pour que les ventes attendues = sièges restants.
+    def plan(lam):
+        return np.clip(-a / (2 * b) + lam / 2.0, lo, hi)
+    def expected_sales(lam):
+        return np.sum(np.maximum(0.0, a + b * plan(lam)))
+    if expected_sales(0.0) <= remaining:
+        return float(plan(0.0)[0])
+    lam_lo, lam_hi = 0.0, 2 * (hi - lo)
+    for _ in range(40):
+        lam = 0.5 * (lam_lo + lam_hi)
+        if expected_sales(lam) > remaining:
+            lam_lo = lam
+        else:
+            lam_hi = lam
+    return float(plan(lam_hi)[0])
+
 
 def get_target_sales(t: int) -> float:
     days = sorted(TARGET_CURVE.keys())
@@ -151,17 +297,37 @@ def p(
 ) -> Tuple[float, Any]:
     t = selling_period_in_current_season
 
-    # Initialisation
+    # Initialisation (l'apprentissage de la semaine 7 est gardé d'une saison à l'autre de la même compétition)
     if t == 1 or information_dump is None or not isinstance(information_dump, dict):
+        learn = information_dump.get('learn') if isinstance(information_dump, dict) else None
         information_dump = {
             'sold_seats': 0,
             'last_price': 65.0,
             'random_curve': generate_random_curve() if RANDOM_TARGET_CURVE else None,
+            'learn': learn if learn is not None else learn_init(),
+            'comp_cap_history': [],
         }
+    learn = information_dump.get('learn')
+    caps = information_dump.setdefault('comp_cap_history', [])
 
     if t > 1 and demand_historical_in_current_season is not None:
         last_demand = demand_historical_in_current_season[-1]
         information_dump['sold_seats'] += int(last_demand)
+        # Semaine 7 : on apprend de la veille (seulement si le concurrent avait des billets et nous aussi)
+        if learn is not None and prices_historical_in_current_season is not None:
+            try:
+                ph = prices_historical_in_current_season
+                if len(caps) >= 1 and caps[-1] and information_dump['sold_seats'] < TOTAL_CAPACITY:
+                    learn_update(learn, t - 1, float(ph[0, -1]), float(ph[1, -1]), float(last_demand))
+                if ph.shape[1] >= 2 and len(caps) >= 2 and caps[-1] and caps[-2]:
+                    reaction_update(learn, float(ph[0, -2] - ph[1, -2]), float(ph[1, -1] - ph[1, -2]))
+            except Exception:
+                pass
+    caps.append(bool(competitor_has_capacity_current_period_in_current_season))
+
+    # Période 101 éventuelle (seulement pour transmettre la demande du jour 100) : pas de vrai prix à fixer
+    if t > MAX_PERIODS:
+        return float(information_dump.get('last_price', 65.0)), information_dump
 
     sold_seats = information_dump['sold_seats']
     remaining_capacity = max(0, TOTAL_CAPACITY - sold_seats)
@@ -209,12 +375,26 @@ def p(
             comp_price = MAX_PRICE
         else:
             comp_price = predict_competitor_price(prices_historical_in_current_season[1])
+        # Semaine 7, étapes 3-4 : le concurrent suit-il notre prix ? (pas en monopole)
+        gamma, last_price = 0.0, float(prices_historical_in_current_season[0, -1])
+        react = None if monopoly else reaction_params(learn)
+        if react is not None:
+            alpha, k = react
+            last_comp = float(prices_historical_in_current_season[1, -1])
+            comp_price = float(np.clip(last_comp + alpha + k * (last_price - last_comp), 0.0, MAX_PRICE))
+            gamma = reaction_gamma(k, min(REACTION_HORIZON, MAX_PERIODS - t + 1))
         if comp_price > 0 and comp_price >= MIN_COMP_PRICE_OLS:
-            ols_price = get_ols_optimal_price(t, comp_price, reference_price)
+            ols_price = None
+            if USE_CAPACITY_OPT:
+                ols_price = get_capacity_optimal_price(t, comp_price, remaining_capacity, learn, gamma, last_price)
+            if ols_price is None:
+                ols_price = get_ols_optimal_price(t, comp_price, reference_price, learn, gamma, last_price)
             reference_price = (1.0 - OLS_WEIGHT) * reference_price + OLS_WEIGHT * ols_price
 
     # Ajustement seulement si on sort des marges de la courbe de remplissage
-    if sold_seats > upper:
+    if USE_CAPACITY_OPT and not FOLLOW_BAND:
+        delta = 0.0
+    elif sold_seats > upper:
         delta = (sold_seats - upper) / max(1.0, upper)
     elif sold_seats < lower:
         delta = (sold_seats - lower) / max(1.0, lower)

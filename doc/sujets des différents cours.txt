@@ -1,0 +1,145 @@
+
+October 6 (AT)
+Introduction to pricing optimization
+
+Introduction to dynamic pricing and the dynamic pricing competition
+
+Development and upload of first pricing algorithm
+
+    Learning Optimization - WP-Module - information about course contents and grading File PDF
+    Week1 Introduction to Dynamic Pricing and DPC File PDF
+    Introduction to pricing optimization File PDF
+
+October 13 (AT)
+        read DPC data files
+        make top level revenue statistics on your simulation results
+        build capacity utilization curve
+        algorithm idea to follow a target capacity utilization curve
+    Load data and make basic stats File IPYNB
+    duopoly_competition_details.csv File CSV
+    duopoly_feedback.data File DATA
+    dpc local simulation notebook File IPYNB
+    duopoly algo for simulation File PY
+    notebook week 2 tasks File IPYNB
+
+October 20 (T)
+    a brief introduction / repitition of (unconstrained) nonlinear optimization
+    pricing strategies
+    estimating the demand model from the logged data by linear regression (part I)
+    information about presentations
+
+        Introduction to nonlinear optimization
+            Overview of nonlinear optimization File PDF
+            gradient descent File IPYNB
+            Documentation of scipy.optimize.minimize URL
+
+            Unconstrained minimization of a non-linear function 
+            Tutorial for scipy.optimize URL
+        Learning/estimating the demand model by linear regression
+            W3 OLS demand model File IPYNB
+            Demand model estimation by linear regression File PDF
+    Pricing strategies File PDF
+    Optimization and Booking Curve File PDF
+
+October 27 (T)
+        build randomized capacity utilization curves
+        build OLS-based demand model 
+        f(price, competitor_price) = demand
+        price optimization based on the estimated demand model
+        price prediction using time series analysis
+        price optimization based on the predicted competitor's price
+         
+
+    Autoregressive Integrated Moving Average (ARIMA) Tutorial URL
+
+November 3 (T)
+    Group presentations #1
+        focused on
+            linear regression
+            capacity utilization (target) curves vs. booking (sales) curves
+
+November 10 (T)
+    Introduction to constrained nonlinear optimization using
+        scipy.optimize
+        Pyomo
+    application to regression and price optimization
+
+    Constraint minimization using scipy.optimize URL
+    Hands-On Mathematical Optimization with Python and Pyomo URL
+    Pyomo introduction URL
+    03-production-planning-advanced File IPYNB
+    02-lad-regression File IPYNB
+    02-ols-regression File IPYNB
+    Optimization in Python: Techniques, Packages, and Best Practices URL
+    Pyomo-Workshop-December-2023 File PDF
+
+    additional information about optimizing using Pyomo
+
+November 17 (T)
+    how to optimize the price using linear and nonlinear programming
+    based on the paper by Bertsimas and Periakis: Dynamic Programming: A learning approach
+    estimating the demand model from the logged data (part II): a regression model
+
+    Dynamic Pricing - A learning approach using nonlinear and linear optimization File PDF
+    Dynamic Pricing- A Learning Approach File PDF
+
+    The paper of Bertsimas and Periakis
+
+November 24 (A)
+        Dynamic Programming (simple brute-force implementation)
+    Notebook Dynamic Programming 1 File IPYNB
+
+December 1 (T)
+    integrated demand model and price optimization (continued)
+    introduction to time series analysis and estimation of the next competitor price
+    introduction to dynamic programming
+
+    A nice overview of and introduction to time series analysis and forecasting URL
+    Some good online books on forecasting URL
+    price tsa File IPYNB
+
+December 8 (AT)
+    Group presentations #2
+        focused on
+            dynamic programming
+            optimized prices
+
+December 15 (T)
+An idea how to exploit situations when your competitor is sold out.
+
+    slides dynamic programming 1 File PDF
+
+December 22 (T)
+
+January 5 (T)
+Recap solution implementation basic models
+
+    Analysis of competition results, with small idea/hint to group competitions of similar demand model realizations 
+    Recap target capacity utilization curves
+    Recap linear regression
+    XGBoost 
+        Idea for feature engineering
+        Parameter optimization with grid search
+
+January 12 (A)
+Intro Reinforcement Learning
+
+January 19 (AT)
+    Group presentations #3
+        focused on
+            machine learning methods like random forest, XGB, ...
+
+January 26 (T)
+Dynamic Pricing and Reinforcement Learning (Part 1)
+
+    Dynamic Pricing with Reinforcement Learning from Scratch: Q-Learning URL
+
+    Source: towardsdatascience.com
+    DynamicPricingWithReinforcementLearning File IPYNB
+
+February 2 (AT)
+    Group presentations #4
+        focused on
+            best performance
+
+February 9 (T)

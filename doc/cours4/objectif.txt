@@ -1,0 +1,7 @@
+
+build randomized capacity utilization curves
+build OLS-based demand model 
+f(price, competitor_price) = demand
+price optimization based on the estimated demand model
+price prediction using time series analysis
+price optimization based on the predicted competitor's price
