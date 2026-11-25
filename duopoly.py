@@ -5,14 +5,14 @@ import numpy as np
 from scipy.stats import poisson
 
 # === TUNED BASELINE CONSTANTS (USED FOR PERIODS 1–19 COLD START) ===
-OPENING_PRICE = 35.0
+OPENING_PRICE = 65.0
 NORMAL_UNDERCUT = 2.0
 AGGRESSIVE_UNDERCUT = 6.0
 HARVEST_MARKUP = 4.0
 URGENCY_THRESHOLD = 0.95
 HARVEST_THRESHOLD = 0.65
 STOCKOUT_PRICE = 75.0
-MIN_PRICE_FLOOR = 10.0
+MIN_PRICE_FLOOR = 22.0
 # ===================================================================
 
 TOTAL_CAPACITY = 80
@@ -165,6 +165,10 @@ def _previous_hybrid_heuristic(
     if not np.isfinite(active_comp_price) or active_comp_price > 500.0:
         return float(np.clip(OPENING_PRICE, MIN_PRICE_FLOOR, MAX_PRICE))
 
+    # Avoid triggering a downward price spiral if the rival is mirroring our last price
+    if abs(active_comp_price - last_price) <= 0.50:
+        return float(np.clip(last_price, MIN_PRICE_FLOOR, MAX_PRICE))
+
     target_rate = remaining_capacity / float(max(1, remaining_periods))
     if target_rate > URGENCY_THRESHOLD:
         tier_price = active_comp_price - AGGRESSIVE_UNDERCUT
@@ -196,6 +200,7 @@ def p(
             "sold_seats": 0,
             "active_cluster": None,
             "dp_table": None,
+            "is_cooperative": False,
             "season_logged": False,
         }
         if season == 1 and t == 1:
@@ -216,6 +221,7 @@ def p(
         )
         information_dump["active_cluster"] = None
         information_dump["dp_table"] = None
+        information_dump["is_cooperative"] = False
         return None, information_dump
 
     # 2. Start of each season (t == 1): calibrate opening price and reset season DP policy
@@ -232,10 +238,11 @@ def p(
         information_dump["sold_seats"] = 0
         information_dump["active_cluster"] = None
         information_dump["dp_table"] = None
+        information_dump["is_cooperative"] = False
         information_dump["season_logged"] = False
         return float(open_p), information_dump
 
-    # 3. Inventory tracking
+    # 3. Inventory & competitor price history tracking
     sold_seats = (
         int(np.sum(demand_historical_in_current_season))
         if (demand_historical_in_current_season is not None and len(demand_historical_in_current_season) > 0)
@@ -244,6 +251,16 @@ def p(
     information_dump["sold_seats"] = sold_seats
     remaining_capacity = max(0, TOTAL_CAPACITY - sold_seats)
     remaining_periods = max(1, MAX_PERIODS - t + 1)
+
+    last_price = float(information_dump.get("last_price", OPENING_PRICE))
+    active_comp_price = np.nan
+    valid_cp = np.array([], dtype=np.float64)
+
+    if prices_historical_in_current_season is not None and prices_historical_in_current_season.shape[1] > 0:
+        comp_hist = prices_historical_in_current_season[1, :]
+        valid_cp = comp_hist[np.isfinite(comp_hist) & (comp_hist < 500.0)]
+        if len(valid_cp) > 0:
+            active_comp_price = float(valid_cp[-1])
 
     if remaining_capacity <= 0:
         if t == 100:
@@ -256,10 +273,12 @@ def p(
             )
         return 150.0, information_dump
 
-    # 4. Competitor out of stock -> monopoly scarcity pricing
+    # 4. Competitor out of stock -> adaptive monopoly scarcity pricing
     if not competitor_has_capacity_current_period_in_current_season:
-        scarcity_mult = 1.0 + 0.35 * (1.0 - (remaining_capacity / float(TOTAL_CAPACITY)))
-        monopoly_price = float(np.clip(STOCKOUT_PRICE * scarcity_mult, MIN_PRICE_FLOOR, 150.0))
+        ref_cp = float(valid_cp[-1]) if len(valid_cp) > 0 else last_price
+        base_monopoly = max(42.0, min(STOCKOUT_PRICE, 1.45 * ref_cp))
+        scarcity_mult = 1.0 + 0.25 * (1.0 - (remaining_capacity / float(TOTAL_CAPACITY)))
+        monopoly_price = float(np.clip(base_monopoly * scarcity_mult, MIN_PRICE_FLOOR, 130.0))
         information_dump["last_price"] = monopoly_price
         if t == 100:
             _record_season_summary(
@@ -270,16 +289,6 @@ def p(
                 fallback_price=monopoly_price,
             )
         return float(monopoly_price), information_dump
-
-    last_price = float(information_dump.get("last_price", OPENING_PRICE))
-    active_comp_price = np.nan
-    valid_cp = np.array([], dtype=np.float64)
-
-    if prices_historical_in_current_season is not None and prices_historical_in_current_season.shape[1] > 0:
-        comp_hist = prices_historical_in_current_season[1, :]
-        valid_cp = comp_hist[np.isfinite(comp_hist) & (comp_hist < 500.0)]
-        if len(valid_cp) > 0:
-            active_comp_price = float(valid_cp[-1])
 
     heuristic_price = _previous_hybrid_heuristic(
         t=t,
@@ -304,24 +313,40 @@ def p(
 
     # 6. Rolling 20-day checkpoints (t = 20, 40, 60, 80): classify booking curve & refresh DP
     if t in DP_CHECKPOINTS or information_dump.get("dp_table") is None:
+        p1_hist = prices_historical_in_current_season[0, :]
+        p2_hist = prices_historical_in_current_season[1, :]
         cluster_id = _classify_booking_curve(
-            p1_hist=prices_historical_in_current_season[0, :],
-            p2_hist=prices_historical_in_current_season[1, :],
+            p1_hist=p1_hist,
+            p2_hist=p2_hist,
             d_hist=demand_historical_in_current_season,
             artifacts=ARTIFACTS,
         )
         params = ARTIFACTS["cluster_models"][cluster_id]
         recent_cp = float(np.mean(valid_cp[-20:])) if len(valid_cp) > 0 else float(params["avg_comp_price"])
 
+        # Detect if opponent mirrors our previous price (e.g., Copycat / Tit-for-Tat)
+        is_cooperative = False
+        if len(p1_hist) >= 6:
+            p1_lag = p1_hist[-20:-1]
+            p2_cur = p2_hist[-len(p1_lag):]
+            valid_pairs = np.isfinite(p2_cur) & (p2_cur < 500.0)
+            if np.sum(valid_pairs) >= 5:
+                mirror_rate = float(np.mean(np.abs(p2_cur[valid_pairs] - p1_lag[valid_pairs]) <= 0.5))
+                is_cooperative = mirror_rate > 0.40
+
+        eff_b1 = float(params["b1"]) + float(params["b2"]) if is_cooperative else float(params["b1"])
+        eff_b2 = 0.0 if is_cooperative else float(params["b2"])
+
         dp_table = solve_dp_policy_from_t(
             start_t=t,
             beta_0=float(params["b0"]),
-            beta_1=float(params["b1"]),
-            beta_2=float(params["b2"]),
+            beta_1=eff_b1,
+            beta_2=eff_b2,
             comp_price=recent_cp,
         )
         information_dump["active_cluster"] = cluster_id
         information_dump["dp_table"] = dp_table
+        information_dump["is_cooperative"] = is_cooperative
 
     # 7. Lookup optimal DP price for current (period t, remaining_capacity)
     dp_table = information_dump["dp_table"]
@@ -333,10 +358,15 @@ def p(
         dp_price = heuristic_price
 
     if np.isfinite(active_comp_price) and active_comp_price < 500.0:
-        # Tighter cap (+3) when behind pace; looser cap (+10) when ahead of pace
-        pace_ratio = remaining_capacity / float(max(1, remaining_periods))
-        max_premium = 3.0 if pace_ratio > 0.75 else 10.0
-        dp_price = min(dp_price, active_comp_price + max_premium)
+        is_mirroring_us = abs(active_comp_price - last_price) <= 1.50
+        if not is_mirroring_us and not information_dump.get("is_cooperative", False):
+            pace_ratio = remaining_capacity / float(max(1, remaining_periods))
+            if pace_ratio > 0.78:
+                # Behind pace vs. a cheaper rival: undercut slightly to win volume
+                dp_price = min(dp_price, active_comp_price - 0.75)
+            else:
+                # Ahead of pace: harvest margin without giving away stockout monopoly
+                dp_price = min(dp_price, active_comp_price + 2.50)
 
     # Smooth price transitions (prevents harsh jumps at checkpoint boundaries)
     new_price = float(np.clip(dp_price, 0.85 * last_price, 1.18 * last_price))
